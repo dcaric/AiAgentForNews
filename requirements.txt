@@ -1,0 +1,14 @@
+feedparser
+sumy
+nltk
+requests
+numpy
+fastapi
+uvicorn
+schedule
+pytz
+google-generativeai
+yfinance
+matplotlib
+google-cloud-storage
+beautifulsoup4
