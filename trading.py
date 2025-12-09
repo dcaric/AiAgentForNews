@@ -10,7 +10,7 @@ from alpaca.trading.client import TradingClient
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.historical.news import NewsClient
 from alpaca.data.requests import StockSnapshotRequest, NewsRequest
-from alpaca.trading.requests import LimitOrderRequest
+from alpaca.trading.requests import LimitOrderRequest, MarketOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce
 
 # --- 2. CONFIGURATION ---
@@ -108,7 +108,7 @@ def get_market_news(symbol):
         return [n.headline for n in news_client.get_news(req).news]
     except: return []
 
-def ask_ai_for_decision(symbol, price, pct_change, news_headlines, model=None):
+def ask_ai_for_decision(symbol, price, pct_change, news_headlines, market_context=None, model=None):
     if not model:
         return {"decision": "HOLD", "reason": "AI not connected"}
 
@@ -116,8 +116,11 @@ def ask_ai_for_decision(symbol, price, pct_change, news_headlines, model=None):
     if news_headlines:
         news_text = "\n".join([f"- {h}" for h in news_headlines])
     else:
-        news_text = "NO NEWS FOUND. (Trade strictly on Price Action/Technicals)"
+        news_text = "NO SPECIFIC COMPANY NEWS FOUND."
     
+    # Format World Context
+    world_context_text = f"Global Market Context:\n{market_context}" if market_context else "No global context provided."
+
     prompt = f"""
     Act as an Aggressive Day Trader. Manage a $1000 portfolio.
     
@@ -125,17 +128,21 @@ def ask_ai_for_decision(symbol, price, pct_change, news_headlines, model=None):
     PRICE: ${price:.2f}
     CHANGE (24H): {pct_change:.2f}%
     
-    NEWS CONTEXT:
+    COMPANY NEWS:
     {news_text}
+
+    WORLD CONTEXT (Politics, Macroeconomics, Wars, Supply Chain):
+    {world_context_text}
     
     STRATEGY RULES:
-    1. DIP BUY: If price is down > 2% (Overreaction), BUY.
-    2. MOMENTUM: If price is up > 3% (FOMO), BUY.
-    3. NEWS: If news is NEGATIVE, SELL/AVOID.
-    4. IF NO NEWS: Trade purely on the price numbers above.
+    1. ANALYZE GLOBAL IMPACT: considering the World Context, how is this specific stock affected? (e.g. Chip bans affecting NVDA, Oil prices affecting Transport, etc.)
+    2. DIP BUY: If price is down > 2% (Overreaction), BUY.
+    3. MOMENTUM: If price is up > 3% (FOMO), BUY.
+    4. NEWS: If news (Company or World) is NEGATIVE for this stock, SELL/AVOID.
+    5. IF NO NEWS: Trade purely on the price numbers above.
     
     Output strictly valid JSON:
-    {{ "decision": "BUY", "reason": "Price dropped 3.4% (Dip Buy) despite no news" }}
+    {{ "decision": "BUY", "reason": "Price dropped 3.4% (Dip Buy) + Positive macro sentiment" }}
     """
     
     try:
@@ -147,7 +154,7 @@ def ask_ai_for_decision(symbol, price, pct_change, news_headlines, model=None):
 
 # --- 5. MAIN SIMULATION LOOP ---
 
-def run_simulation(return_logs=False):
+def run_simulation(return_logs=False, market_context=None):
     """
     Runs the simulation. 
     If return_logs=True, returns a string containing the output log.
@@ -163,7 +170,7 @@ def run_simulation(return_logs=False):
 
     if not trading_client or not data_client:
         log("❌ Alpaca clients not initialized. Check API Keys.")
-        if return_logs: return "\n".join(logs)
+        if return_logs: return "\n".join(logs), []
         return
 
     # Initialize AI (if not already done globally, ensuring we use local log)
@@ -210,7 +217,7 @@ def run_simulation(return_logs=False):
             headlines = get_market_news(symbol)
             if headlines: log(f"      📰 News: {headlines[0][:60]}...")
             
-            ai_result = ask_ai_for_decision(symbol, price, change_pct, headlines, model=ai_model)
+            ai_result = ask_ai_for_decision(symbol, price, change_pct, headlines, market_context=market_context, model=ai_model)
             decision = ai_result.get("decision", "HOLD").upper()
             reason = ai_result.get("reason", "N/A")
             

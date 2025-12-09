@@ -467,6 +467,7 @@ class NewsCollector:
         self.world_feeds = [
             "http://feeds.bbci.co.uk/news/world/rss.xml",
             "https://www.reutersagency.com/feed/?best-topics=world&post_type=best",
+            "https://finance.yahoo.com/news/rssindex",
         ]
         self.nba_feeds = [
             "https://www.espn.com/espn/rss/nba/news",
@@ -824,7 +825,18 @@ def generate_and_send_report():
     # 8. Trading Simulation Report
     attachments = {}
     try:
-        trading_report_log, trading_state = trading.run_simulation(return_logs=True)
+        # Combine World News and Tech/AI News for richer context
+        combined_context = f"""
+        WORLD NEWS SUMMARY (Politics, Macroeconomics):
+        {world_summary}
+
+        TECH & AI INDUSTRY NEWS (Apple, AI Models, Tech Sector):
+        {apple_ai_curated}
+        """
+
+        # Pass the Combined Context to the Trading AI
+        trading_report_log, trading_state = trading.run_simulation(return_logs=True, market_context=combined_context)
+        
         html_content += "<h1>Trading Simulation</h1>"
         html_content += "<div style='background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin-bottom: 20px; font-family: monospace; white-space: pre-wrap;'>"
         html_content += f"<h3>📈 Simulation Log</h3>"
