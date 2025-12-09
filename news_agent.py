@@ -19,6 +19,9 @@ from google.cloud import storage
 import json
 from io import BytesIO
 
+# --- Trading Simulation ---
+import trading
+
 # --- Stock Portfolio Tracker ---
 class StockCollector:
     def __init__(self):
@@ -586,7 +589,7 @@ class EmailService:
         self.email_password = os.environ.get("EMAIL_PASSWORD")
         self.recipient = os.environ.get("RECIPIENT_EMAIL", "dario.caric@gmail.com")
 
-    def send_email(self, subject, body, images=None):
+    def send_email(self, subject, body, images=None, attachments=None):
         if not self.email_user or not self.email_password:
             print("Email credentials not set. Skipping email.")
             return
@@ -608,6 +611,20 @@ class EmailService:
                 image = MIMEImage(img_data.read())
                 image.add_header('Content-ID', f'<{img_id}>')
                 msg.attach(image)
+        
+        # Attach generic files
+        if attachments:
+            from email.utils import make_msgid
+            from email.mime.application import MIMEApplication
+            for filename, content in attachments.items():
+                # content can be bytes or string
+                if isinstance(content, str):
+                    content = content.encode('utf-8')
+                
+                part = MIMEApplication(content, Name=filename)
+                part['Content-Disposition'] = f'attachment; filename="{filename}"'
+                msg.attach(part)
+
 
         try:
             server = smtplib.SMTP(self.smtp_server, self.smtp_port)
@@ -803,12 +820,45 @@ def generate_and_send_report():
     html_content += "<h3>🤖 AI Market Analysis</h3>"
     html_content += f"{stock_analysis}"
     
+    
+    # 8. Trading Simulation Report
+    attachments = {}
+    try:
+        trading_report_log, trading_state = trading.run_simulation(return_logs=True)
+        html_content += "<h1>Trading Simulation</h1>"
+        html_content += "<div style='background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin-bottom: 20px; font-family: monospace; white-space: pre-wrap;'>"
+        html_content += f"<h3>📈 Simulation Log</h3>"
+        html_content += f"<pre>{trading_report_log}</pre>"
+
+        # Generate Equity Graph
+        equity_history = trading_state.get("equity_history", [])
+        if equity_history:
+            trading_img_buf = graph_generator.generate_portfolio_chart(equity_history)
+            if trading_img_buf:
+                trading_img_id = "chart_trading_equity"
+                images[trading_img_id] = trading_img_buf
+                html_content += f"<h3>💰 Total Equity Growth</h3>"
+                html_content += f'<img src="cid:{trading_img_id}" alt="Total Equity History" style="width: 100%; max-width: 600px; height: auto;">'
+        
+        # Prepare Transaction History Attachment
+        tx_history = trading_state.get("history", [])
+        if tx_history:
+            # Join with newlines
+            history_text = "\n".join(tx_history)
+            attachments["transaction_history.txt"] = history_text
+            html_content += "<p><i>(Full transaction history attached as transaction_history.txt)</i></p>"
+
+        html_content += "</div>"
+    except Exception as e:
+        print(f"Error running trading simulation: {e}")
+        html_content += f"<p>Error running trading simulation: {e}</p>"
+
     html_content += "</div>" # Close Stock Portfolio div
     html_content += "</body></html>"
 
     email_service = EmailService()
     subject = f"DARIO NEWS - {datetime.now().strftime('%Y-%m-%d')}"
-    email_service.send_email(subject, html_content, images)
+    email_service.send_email(subject, html_content, images, attachments)
 
 def run_scheduler():
     # Schedule for 8am and 7pm CET
@@ -817,7 +867,7 @@ def run_scheduler():
     # For simplicity in this MVP, we schedule at the specific times.
     
     cet_tz = pytz.timezone("Europe/Paris")
-    schedule.every().day.at("08:00", cet_tz).do(generate_and_send_report)
+    schedule.every().day.at("08:30", cet_tz).do(generate_and_send_report)
     schedule.every().day.at("19:00", cet_tz).do(generate_and_send_report)
     
     print("Scheduler started. Tasks scheduled for 08:00 and 19:00.")

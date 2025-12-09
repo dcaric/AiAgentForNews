@@ -12,3 +12,4 @@ yfinance
 matplotlib
 google-cloud-storage
 beautifulsoup4
+alpaca-py

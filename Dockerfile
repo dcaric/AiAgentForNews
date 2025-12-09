@@ -8,7 +8,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Install NLTK data
 RUN python -m nltk.downloader punkt punkt_tab
 
-COPY news_agent.py .
+COPY . .
 
 # Run the application
 CMD ["python", "news_agent.py", "serve"]
