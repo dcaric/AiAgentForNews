@@ -21,7 +21,8 @@ STATE_FILE_NAME = 'portfolio_ai_state.json'
 
 # B. Simulation Settings
 STARTING_CASH = 1000.0
-MARKET_UNIVERSE = ["AAPL", "TSLA", "NVDA", "AMD", "MSFT", "AMZN", "GOOGL", "META", "INTC", "PLTR"] 
+# MARKET_UNIVERSE imported from config
+from config import MARKET_UNIVERSE 
 
 # C. Load API Keys
 ALPACA_KEY = os.environ.get('ALPACA_API_KEY')

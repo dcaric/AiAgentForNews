@@ -21,11 +21,15 @@ from io import BytesIO
 
 # --- Trading Simulation ---
 import trading
+from config import (
+    MARKET_UNIVERSE, TECH_NEWS_FEEDS, MY_HOLDINGS, 
+    WORLD_NEWS_FEEDS, NBA_NEWS_FEEDS, CROATIAN_NEWS_FEEDS, DALMATIA_NEWS_FEEDS
+)
 
 # --- Stock Portfolio Tracker ---
 class StockCollector:
     def __init__(self):
-        self.tickers = ['AAPL', 'NVDA', 'GOOG']
+        self.tickers = list(MY_HOLDINGS.keys())
 
     def get_stock_data(self):
         data = {}
@@ -63,11 +67,7 @@ class StockCollector:
 class PortfolioManager:
     def __init__(self):
         # Constants for holdings
-        self.holdings = {
-            'NVDA': 20.877,
-            'AAPL': 5.486,
-            'GOOG': 3.042
-        }
+        self.holdings = MY_HOLDINGS
         self.bucket_name = os.environ.get("BUCKET_NAME")
         self.history_file = "portfolio_history.json"
 
@@ -144,6 +144,11 @@ class GraphGenerator:
         plt.plot(dates, totals, color='green', marker='o', linestyle='-')
         plt.title("Total Capital Growth")
         plt.grid(True, linestyle='--', alpha=0.7)
+        
+        # Fix for single data point (Matplotlib default is too wide)
+        if len(dates) == 1:
+            plt.xlim(dates[0] - timedelta(days=2), dates[0] + timedelta(days=2))
+            
         plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
         plt.xticks(rotation=45)
         plt.tight_layout()
@@ -364,19 +369,19 @@ class LLMSummarizer:
         except Exception as e:
             return f"Error curating Dalmatia news: {e}"
 
-    def curate_apple_ai_news(self, articles):
+    def curate_tech_news(self, articles):
         if not self.model:
             return "Gemini API Key missing. Cannot curate news."
             
-        prompt = """
-        You are a tech news editor. From the following list of articles, select the **Top 10** most important stories related to:
-        1. **Apple** (products, software, corporate)
-        2. **Artificial Intelligence** (breakthroughs, major models, industry impact)
+        prompt = f"""
+        You are a tech portfolio manager. From the following list of articles, select the **Top 10** most important stories related to:
+        1. **Portfolio Stocks**: {', '.join(MARKET_UNIVERSE)}
+        2. **General Tech & AI Trends** (impacting the sector)
         
-        **EVALUATION:** Prioritize major announcements, reviews of new products, and significant AI developments over minor rumors or niche updates.
+        **EVALUATION:** Prioritize major announcements affecting the specific stocks in the portfolio, product launches, and regulation.
         
         **OUTPUT FORMAT:**
-        1.  **Summary Paragraph:** A single, cohesive HTML paragraph (<p>...</p>) summarizing the key trends in Apple and AI from these articles. Use <b>bold</b> for key terms.
+        1.  **Summary Paragraph:** A single, cohesive HTML paragraph (<p>...</p>) summarizing the key trends affecting the portfolio. Use <b>bold</b> for key terms.
         2.  **Article List:** A clean HTML list (<ul>...</ul>) of the selected 10 articles. Each item: <li><a href='LINK'>TITLE</a> - SUMMARY</li>
         
         Keep the language in English.
@@ -391,7 +396,7 @@ class LLMSummarizer:
             response = self.model.generate_content(prompt)
             return response.text
         except Exception as e:
-            return f"Error curating Apple & AI news: {e}"
+            return f"Error curating Tech news: {e}"
 
 
     def crawl_url(self, url):
@@ -412,46 +417,27 @@ class LLMSummarizer:
             print(f"Error crawling {url}: {e}")
             return ""
 
-    def analyze_stock_market(self):
+    def analyze_stock_market(self, news_context):
         if not self.model:
             return "<p><i>(Gemini API Key missing. Cannot analyze stocks.)</i></p>"
             
         try:
-            # 1. Crawl sources directly
-            urls = [
-                "https://finance.yahoo.com",
-                "https://www.cnbc.com/technology/",
-                "https://www.marketwatch.com",
-                "https://www.reuters.com/markets/"
-            ]
-            
-            context_text = ""
-            for url in urls:
-                print(f"Crawling {url}...")
-                text = self.crawl_url(url)
-                if text:
-                    context_text += f"\n--- SOURCE: {url} ---\n{text}\n"
-            
-            if not context_text:
-                context_text = "No external data could be crawled. Please analyze based on general knowledge."
-
-            # 2. Use Gemini 2.0 Flash (Experimental) without tools
-            # User requested gemini-2.5-flash, likely meaning gemini-2.0-flash-exp
-            grounding_model = genai.GenerativeModel('gemini-2.5-flash')
+            # Use Gemini 2.0 Flash (Experimental)
+            grounding_model = genai.GenerativeModel('gemini-2.0-flash-exp')
             
             prompt = f"""
-            Analyze the current stock market trends for **Apple (AAPL)**, **Nvidia (NVDA)**, and **Google (GOOG/GOOGL)**.
+            You are a Senior Financial Analyst. 
+            Based **ONLY** on the provided news context below, analyze the current market sentiment and specific impacts on the following companies:
+            {', '.join(MARKET_UNIVERSE)}
             
+            **NEWS CONTEXT:**
+            {news_context[:200000]}  # Limit context (Gemini 2.0 Flash has 1M token window, so this is safe)
             
             **OUTPUT FORMAT:**
             Provide a concise **HTML summary** (no Markdown).
-            -   Start with a general **Market Sentiment** paragraph.
-            -   Then provide a bulleted list for each company with key insights:
-                <ul>
-                <li><b>AAPL:</b> [Analysis]</li>
-                <li><b>NVDA:</b> [Analysis]</li>
-                <li><b>GOOG:</b> [Analysis]</li>
-                </ul>
+            -   Start with a general **Market Sentiment** paragraph based on the news.
+            -   Then provide a bulleted list (`<ul>`) with key insights for **EACH** stock in the list above:
+                `<li><b>TICKER:</b> [Analysis based on the news. If no specific news found, infer impact from sector trends.]</li>`
             -   End with a brief **Tech World Summary**.
             """
             
@@ -462,36 +448,15 @@ class LLMSummarizer:
             print(f"Error analyzing stock market: {e}")
             return f"<p><i>(Stock analysis unavailable. Error: {str(e)[:100]})</i></p>"
 
+
+
 class NewsCollector:
     def __init__(self):
-        self.world_feeds = [
-            "http://feeds.bbci.co.uk/news/world/rss.xml",
-            "https://www.reutersagency.com/feed/?best-topics=world&post_type=best",
-            "https://finance.yahoo.com/news/rssindex",
-        ]
-        self.nba_feeds = [
-            "https://www.espn.com/espn/rss/nba/news",
-            "https://sports.yahoo.com/nba/rss/",
-            "https://www.rotowire.com/rss/news.php?sport=NBA",
-        ]
-        self.croatian_feeds = [
-            "https://www.index.hr/rss/vijesti",
-            "https://www.tportal.hr/rss",
-            "https://www.jutarnji.hr/rss",
-        ]
-        self.dalmatia_feeds = [
-            "https://www.dalmacijanews.hr/feed",
-            "https://www.dalmacijadanas.hr/feed",
-            "https://dalmatinskiportal.hr/rss",
-        ]
-        self.apple_ai_feeds = [
-            "https://techcrunch.com/feed/",
-            "https://9to5mac.com/feed/",
-            "https://www.techradar.com/rss",
-            "https://www.cnet.com/rss/news/",
-            "https://www.economist.com/science-and-technology/rss.xml",
-            "https://www.artificialintelligence-news.com/feed/",
-        ]
+        self.world_feeds = WORLD_NEWS_FEEDS
+        self.nba_feeds = NBA_NEWS_FEEDS
+        self.croatian_feeds = CROATIAN_NEWS_FEEDS
+        self.dalmatia_feeds = DALMATIA_NEWS_FEEDS
+        self.tech_feeds = TECH_NEWS_FEEDS
 
     def collect_feeds(self, feeds):
         print(f"Collecting news from {len(feeds)} feeds...")
@@ -548,9 +513,15 @@ class NewsCollector:
                 print(f"Error collecting from {feed_url}: {e}")
         return articles
 
-    def collect_apple_ai_news(self):
-        print(f"Collecting Apple & AI news from {len(self.apple_ai_feeds)} feeds...")
-        return self.collect_feeds(self.apple_ai_feeds)
+    def collect_tech_news(self):
+        print(f"Collecting Tech Portfolio news from {len(self.tech_feeds)} feeds...")
+        return self.collect_feeds(self.tech_feeds)
+
+    def collect_specific_stock_news(self, tickers):
+        print(f"Collecting targeted news for {len(tickers)} stocks...")
+        stock_feeds = [f"https://finance.yahoo.com/rss/headline?s={ticker}" for ticker in tickers]
+        # These are usually high signal, so we rely on collect_feeds default limit
+        return self.collect_feeds(stock_feeds)
 
 class NewsSummarizer:
     def __init__(self):
@@ -697,13 +668,14 @@ def generate_and_send_report():
     html_content += "</div>"
 
     # 4. Apple & AI News
-    html_content += "<h1>Apple & AI News</h1>"
-    apple_ai_articles = collector.collect_apple_ai_news()
-    apple_ai_curated = llm_summarizer.curate_apple_ai_news(apple_ai_articles)
+    # 4. Tech Portfolio News
+    html_content += "<h1>Tech Portfolio News</h1>"
+    tech_articles = collector.collect_tech_news()
+    tech_curated = llm_summarizer.curate_tech_news(tech_articles)
     
     html_content += "<div style='background-color: #f3e5f5; padding: 15px; border-radius: 5px; margin-bottom: 20px;'>"
-    html_content += "<h3>🍎 Apple & AI Highlights</h3>"
-    html_content += f"{apple_ai_curated}"
+    html_content += "<h3>📱 Portfolio Highlights</h3>"
+    html_content += f"{tech_curated}"
     html_content += "</div>"
 
     # 5. NBA News
@@ -815,8 +787,22 @@ def generate_and_send_report():
     elif not portfolio_manager.bucket_name:
         html_content += "<p><i>(Persistence not enabled. Set BUCKET_NAME to see history graph)</i></p>"
 
-    # AI Market Analysis
-    stock_analysis = llm_summarizer.analyze_stock_market()
+    # Combined RSS feeds for analysis (World + Tech + Specific Tickers)
+    specific_stock_articles = collector.collect_specific_stock_news(MARKET_UNIVERSE)
+    
+    full_news_context = "WORLD NEWS_ARTICLES:\n"
+    for art in world_articles:
+        full_news_context += f"-Title: {art['title']}\n Summary: {art['summary']}\n"
+        
+    full_news_context += "\nTECH SECTOR NEWS ARTICLES:\n"
+    for art in tech_articles:
+        full_news_context += f"-Title: {art['title']}\n Summary: {art['summary']}\n"
+
+    full_news_context += "\nTARGETED STOCK NEWS ARTICLES (Yahoo Finance):\n"
+    for art in specific_stock_articles:
+        full_news_context += f"-Title: {art['title']}\n Summary: {art['summary']}\n"
+
+    stock_analysis = llm_summarizer.analyze_stock_market(full_news_context)
     html_content += "<hr style='border: 0; border-top: 1px solid #ccc; margin: 15px 0;'>"
     html_content += "<h3>🤖 AI Market Analysis</h3>"
     html_content += f"{stock_analysis}"
@@ -830,8 +816,11 @@ def generate_and_send_report():
         WORLD NEWS SUMMARY (Politics, Macroeconomics):
         {world_summary}
 
-        TECH & AI INDUSTRY NEWS (Apple, AI Models, Tech Sector):
-        {apple_ai_curated}
+        TECH PORTFOLIO NEWS (Sector Trends, Specific Stock News):
+        {tech_curated}
+
+        GENERAL MARKET ANALYSIS (Financial Media Sentiment):
+        {stock_analysis}
         """
 
         # Pass the Combined Context to the Trading AI
