@@ -109,7 +109,7 @@ def get_market_news(symbol):
         return [n.headline for n in news_client.get_news(req).news]
     except: return []
 
-def ask_ai_for_decision(symbol, price, pct_change, news_headlines, market_context=None, model=None):
+def ask_ai_for_decision(symbol, price, pct_change, news_headlines, market_context=None, portfolio_context=None, model=None):
     if not model:
         return {"decision": "HOLD", "reason": "AI not connected"}
 
@@ -122,12 +122,22 @@ def ask_ai_for_decision(symbol, price, pct_change, news_headlines, market_contex
     # Format World Context
     world_context_text = f"Global Market Context:\n{market_context}" if market_context else "No global context provided."
 
+    # Format Portfolio Context
+    if portfolio_context and portfolio_context.get('qty', 0) > 0:
+        avg_price = portfolio_context.get('avg_price', 0)
+        gain_pct = ((price - avg_price) / avg_price) * 100 if avg_price > 0 else 0
+        portfolio_text = f"    WE OWN THIS STOCK: {portfolio_context['qty']} shares @ ${avg_price:.2f} (Current Gain: {gain_pct:+.2f}%)"
+    else:
+        portfolio_text = "    WE DO NOT OWN THIS STOCK."
+
     prompt = f"""
     Act as an Aggressive Day Trader. Manage a $1000 portfolio.
     
     STOCK: {symbol}
     PRICE: ${price:.2f}
     CHANGE (24H): {pct_change:.2f}%
+    POSITIONS:
+    {portfolio_text}
     
     COMPANY NEWS:
     {news_text}
@@ -136,14 +146,15 @@ def ask_ai_for_decision(symbol, price, pct_change, news_headlines, market_contex
     {world_context_text}
     
     STRATEGY RULES:
-    1. ANALYZE GLOBAL IMPACT: considering the World Context, how is this specific stock affected? (e.g. Chip bans affecting NVDA, Oil prices affecting Transport, etc.)
-    2. DIP BUY: If price is down > 2% (Overreaction), BUY.
-    3. MOMENTUM: If price is up > 3% (FOMO), BUY.
-    4. NEWS: If news (Company or World) is NEGATIVE for this stock, SELL/AVOID.
-    5. IF NO NEWS: Trade purely on the price numbers above.
+    1. ANALYZE GLOBAL IMPACT & NEWS: Are there major headwinds? If NEWS is NEGATIVE, SELL/AVOID.
+    2. TAKE PROFIT: If we own the stock AND price is > 5% above Avg Entry, SELL (Lock in gains).
+    3. STOP LOSS: If we own the stock AND price is < 5% below Avg Entry, SELL (Stop the bleeding).
+    4. DIP BUY: If we DO NOT own it: Price down > 2% (Overreaction) AND News is NOT Negative -> BUY.
+    5. MOMENTUM: If we DO NOT own it: Price up > 3% (FOMO) -> BUY.
+    6. HOLD: If none of the above trigger, HOLD.
     
-    Output strictly valid JSON:
-    {{ "decision": "BUY", "reason": "Price dropped 3.4% (Dip Buy) + Positive macro sentiment" }}
+    Output strictly valid JSON (Example):
+    {{ "decision": "HOLD", "reason": "Price is flat, no significant news." }}
     """
     
     try:
@@ -218,7 +229,17 @@ def run_simulation(return_logs=False, market_context=None):
             headlines = get_market_news(symbol)
             if headlines: log(f"      📰 News: {headlines[0][:60]}...")
             
-            ai_result = ask_ai_for_decision(symbol, price, change_pct, headlines, market_context=market_context, model=ai_model)
+            # Get portfolio context for this symbol
+            portfolio_ctx = state["portfolio"].get(symbol, {})
+            
+            # Debug Log for Gain %
+            if portfolio_ctx.get("qty", 0) > 0:
+                avg = portfolio_ctx.get("avg_price", 0)
+                if avg > 0:
+                    gain = ((price - avg) / avg) * 100
+                    log(f"      💰 Position Gain/Loss: {gain:+.2f}% (Entry: ${avg:.2f})")
+
+            ai_result = ask_ai_for_decision(symbol, price, change_pct, headlines, market_context=market_context, portfolio_context=portfolio_ctx, model=ai_model)
             decision = ai_result.get("decision", "HOLD").upper()
             reason = ai_result.get("reason", "N/A")
             
