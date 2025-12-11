@@ -805,6 +805,27 @@ def generate_and_send_report():
     stock_analysis = llm_summarizer.analyze_stock_market(full_news_context)
     html_content += "<hr style='border: 0; border-top: 1px solid #ccc; margin: 15px 0;'>"
     html_content += "<h3>🤖 AI Market Analysis</h3>"
+    
+    # Overall Market Status
+    try:
+        market_status = trading.get_market_status()
+        if market_status:
+            html_content += f"""
+            <div style='background-color: #e8eaed; padding: 10px; border-radius: 5px; margin-bottom: 15px;'>
+                <p style='margin: 0; font-size: 1.1em;'>
+                    <b>Overall Market Status:</b> {market_status['status']} 
+                    <span style='font-size: 0.9em; color: #555;'>
+                        (Avg Change: {market_status['avg_change']:+.2f}%)
+                    </span>
+                </p>
+                <p style='margin: 5px 0 0 0; font-size: 0.9em;'>
+                    🟢 <b>{market_status['up_count']}</b> Up &nbsp;|&nbsp; 🔴 <b>{market_status['down_count']}</b> Down
+                </p>
+            </div>
+            """
+    except Exception as e:
+        print(f"Error fetching market status: {e}")
+
     html_content += f"{stock_analysis}"
     
     

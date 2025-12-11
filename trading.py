@@ -166,6 +166,62 @@ def ask_ai_for_decision(symbol, price, pct_change, news_headlines, market_contex
 
 # --- 5. MAIN SIMULATION LOOP ---
 
+def get_market_status():
+    """
+    Calculates the overall market status based on the MARKET_UNIVERSE.
+    Returns a dict with status, up_count, down_count, avg_change.
+    """
+    if not data_client:
+        return None
+    
+    try:
+        snap = data_client.get_stock_snapshot(StockSnapshotRequest(symbol_or_symbols=MARKET_UNIVERSE))
+        
+        up = 0
+        down = 0
+        total_change = 0.0
+        count = 0
+        
+        for symbol, data in snap.items():
+            if not data.latest_trade or not data.previous_daily_bar:
+                continue
+            
+            price = data.latest_trade.price
+            prev = data.previous_daily_bar.close
+            
+            if prev == 0: continue
+            
+            change_pct = ((price - prev) / prev) * 100
+            total_change += change_pct
+            count += 1
+            
+            if change_pct >= 0:
+                up += 1
+            else:
+                down += 1
+        
+        if count == 0:
+            return None
+            
+        avg_change = total_change / count
+        
+        if avg_change >= 0.5:
+            status = "Bullish 🟢"
+        elif avg_change <= -0.5:
+            status = "Bearish 🔴"
+        else:
+            status = "Mixed 🟡"
+            
+        return {
+            "status": status,
+            "up_count": up,
+            "down_count": down,
+            "avg_change": avg_change
+        }
+    except Exception as e:
+        print(f"Error getting market status: {e}")
+        return None
+
 def run_simulation(return_logs=False, market_context=None):
     """
     Runs the simulation. 
