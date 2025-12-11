@@ -221,94 +221,91 @@ def run_simulation(return_logs=False, market_context=None):
         
         qty_owned = state["portfolio"].get(symbol, {}).get("qty", 0)
 
-        # Filter: Only act if Owned OR Volatile (>1.5%)
-        # For simulation purposes/testing, we might want to relax this or ensure we see output
-        if (qty_owned > 0) or (abs(change_pct) > 1.5):
-            log(f"\n   🔍 {symbol}: ${price:.2f} ({change_pct:+.2f}%)")
-            
-            headlines = get_market_news(symbol)
-            if headlines: log(f"      📰 News: {headlines[0][:60]}...")
-            
-            # Get portfolio context for this symbol
-            portfolio_ctx = state["portfolio"].get(symbol, {})
-            
-            # Debug Log for Gain %
-            if portfolio_ctx.get("qty", 0) > 0:
-                avg = portfolio_ctx.get("avg_price", 0)
-                if avg > 0:
-                    gain = ((price - avg) / avg) * 100
-                    log(f"      💰 Position Gain/Loss: {gain:+.2f}% (Entry: ${avg:.2f})")
+        log(f"\n   🔍 {symbol}: ${price:.2f} ({change_pct:+.2f}%)")
+        
+        headlines = get_market_news(symbol)
+        if headlines: log(f"      📰 News: {headlines[0][:60]}...")
+        
+        # Get portfolio context for this symbol
+        portfolio_ctx = state["portfolio"].get(symbol, {})
+        
+        # Debug Log for Gain %
+        if portfolio_ctx.get("qty", 0) > 0:
+            avg = portfolio_ctx.get("avg_price", 0)
+            if avg > 0:
+                gain = ((price - avg) / avg) * 100
+                log(f"      💰 Position Gain/Loss: {gain:+.2f}% (Entry: ${avg:.2f})")
 
-            ai_result = ask_ai_for_decision(symbol, price, change_pct, headlines, market_context=market_context, portfolio_context=portfolio_ctx, model=ai_model)
-            decision = ai_result.get("decision", "HOLD").upper()
-            reason = ai_result.get("reason", "N/A")
+        ai_result = ask_ai_for_decision(symbol, price, change_pct, headlines, market_context=market_context, portfolio_context=portfolio_ctx, model=ai_model)
+        decision = ai_result.get("decision", "HOLD").upper()
+        reason = ai_result.get("reason", "N/A")
+        
+        log(f"      🤖 {decision}: {reason}")
+        
+        # --- EXECUTE TRADE ---
+        
+        # 1. BUY LOGIC
+        if decision == "BUY":
+            # CHECK FOR WASH TRADE (Cooldown Rule)
+            today_str = str(date.today())
+            was_sold_today = any(f"{today_str}: SOLD" in entry and f"{symbol}" in entry for entry in state["history"])
             
-            log(f"      🤖 {decision}: {reason}")
-            
-            # --- EXECUTE TRADE ---
-            
-            # 1. BUY LOGIC
-            if decision == "BUY":
-                # CHECK FOR WASH TRADE (Cooldown Rule)
-                today_str = str(date.today())
-                was_sold_today = any(f"{today_str}: SOLD {symbol}" in entry for entry in state["history"])
+            if was_sold_today:
+                log(f"      ⚠️ SKIPPED BUY: Sold {symbol} today (Wash Trade Prevention)")
+            elif qty_owned == 0:
+                # Calculate Quantity (Max 25% of cash)
+                invest_amount = state["cash"] * 0.25
                 
-                if was_sold_today:
-                    log(f"      ⚠️ SKIPPED BUY: Sold {symbol} today (Wash Trade Prevention)")
-                elif qty_owned == 0:
-                    # Calculate Quantity (Max 25% of cash)
-                    invest_amount = state["cash"] * 0.25
+                # FRACTIONAL SHARES: Allow buying if we have at least $10 to invest
+                if invest_amount >= 10.0:
+                    qty_to_buy = round(invest_amount / price, 4)
                     
-                    # FRACTIONAL SHARES: Allow buying if we have at least $10 to invest
-                    if invest_amount >= 10.0:
-                        qty_to_buy = round(invest_amount / price, 4)
-                        
-                        try:
-                            # Use MARKET order for fractional shares
-                            order_data = MarketOrderRequest(
-                                symbol=symbol,
-                                qty=qty_to_buy,
-                                side=OrderSide.BUY,
-                                time_in_force=TimeInForce.DAY
-                            )
-                            trading_client.submit_order(order_data)
-                            
-                            # Update State (Estimate cost at current price since it's market order)
-                            cost = qty_to_buy * price
-                            state["cash"] -= cost
-                            state["portfolio"][symbol] = {"qty": qty_to_buy, "avg_price": price}
-                            state["history"].append(f"{date.today()}: BOUGHT {qty_to_buy} {symbol}")
-                            save_state(state)
-                            log(f"      ✅ BOUGHT {qty_to_buy} {symbol} (Market Order)")
-                        except Exception as e:
-                            log(f"      ❌ Buy Failed: {e}")
-                    else:
-                        log(f"      ⚠️ SKIPPED BUY: Insufficient funds (${invest_amount:.2f}) for minimum trade")
-                else:
-                     log(f"      ⚠️ SKIPPED BUY: Already own {qty_owned} shares (Wait for sell signal)")
-
-            # 2. SELL LOGIC
-            elif decision == "SELL":
-                if qty_owned > 0:
                     try:
-                        # Use MARKET order to clear position (supports fractional)
+                        # Use MARKET order for fractional shares
                         order_data = MarketOrderRequest(
                             symbol=symbol,
-                            qty=qty_owned,
-                            side=OrderSide.SELL,
+                            qty=qty_to_buy,
+                            side=OrderSide.BUY,
                             time_in_force=TimeInForce.DAY
                         )
                         trading_client.submit_order(order_data)
                         
-                        # Update State
-                        revenue = qty_owned * price
-                        state["cash"] += revenue
-                        del state["portfolio"][symbol]
-                        state["history"].append(f"{date.today()}: SOLD {symbol}")
+                        # Update State (Estimate cost at current price since it's market order)
+                        cost = qty_to_buy * price
+                        state["cash"] -= cost
+                        state["portfolio"][symbol] = {"qty": qty_to_buy, "avg_price": price}
+                        state["history"].append(f"{date.today()}: BOUGHT {qty_to_buy} {symbol}")
                         save_state(state)
-                        log(f"      🚨 SOLD {qty_owned} {symbol} (Market Order)")
+                        log(f"      ✅ BOUGHT {qty_to_buy} {symbol} (Market Order)")
                     except Exception as e:
-                        log(f"      ❌ Sell Failed: {e}")
+                        log(f"      ❌ Buy Failed: {e}")
+                else:
+                    log(f"      ⚠️ SKIPPED BUY: Insufficient funds (${invest_amount:.2f}) for minimum trade")
+            else:
+                    log(f"      ⚠️ SKIPPED BUY: Already own {qty_owned} shares (Wait for sell signal)")
+
+        # 2. SELL LOGIC
+        elif decision == "SELL":
+            if qty_owned > 0:
+                try:
+                    # Use MARKET order to clear position (supports fractional)
+                    order_data = MarketOrderRequest(
+                        symbol=symbol,
+                        qty=qty_owned,
+                        side=OrderSide.SELL,
+                        time_in_force=TimeInForce.DAY
+                    )
+                    trading_client.submit_order(order_data)
+                    
+                    # Update State
+                    revenue = qty_owned * price
+                    state["cash"] += revenue
+                    del state["portfolio"][symbol]
+                    state["history"].append(f"{date.today()}: SOLD {qty_owned} {symbol}")
+                    save_state(state)
+                    log(f"      🚨 SOLD {qty_owned} {symbol} (Market Order)")
+                except Exception as e:
+                    log(f"      ❌ Sell Failed: {e}")
                 else:
                     log(f"      ⚠️ SKIPPED SELL: No position to sell")
 
