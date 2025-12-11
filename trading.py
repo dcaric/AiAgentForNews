@@ -161,8 +161,8 @@ def ask_ai_for_decision(symbol, price, pct_change, news_headlines, market_contex
         config = genai.types.GenerationConfig(temperature=0.2, response_mime_type="application/json")
         response = model.generate_content(prompt, generation_config=config)
         return json.loads(response.text)
-    except:
-        return {"decision": "HOLD", "reason": "Error"}
+    except Exception as e:
+        return {"decision": "HOLD", "reason": f"Error: {str(e)}"}
 
 # --- 5. MAIN SIMULATION LOOP ---
 
@@ -372,6 +372,9 @@ def run_simulation(return_logs=False, market_context=None):
                     log(f"      ❌ Sell Failed: {e}")
                 else:
                     log(f"      ⚠️ SKIPPED SELL: No position to sell")
+
+        # Rate Limiting Sleep
+        time.sleep(2)
 
     # --- CALCULATE TOTAL EQUITY ---
     holdings_value = 0.0
