@@ -1,8 +1,7 @@
-# Task: Fix API Rate Limiting
+# Task: Optimize for Paid API & Expand Universe
 
-The user is encountering `429 Quota Exceeded` errors because the `gemini-2.0-flash-exp` model has a strict limit of 10 requests per minute (RPM).
+User is on the paid Gemini API tier. We can reduce rate limit safeguards and expand the stock list to track broader market movements.
 
-- [x] Update `trading.py` to prioritize `gemini-1.5-flash` (higher rate limits).
-- [x] Increase sleep delay in `run_simulation` from 2s to 12s (to allow 429 penalties to reset if hit, or just stay under 5 RPM to be safe across all tasks).
-- [x] Implement BackgroundTasks in FastAPI to prevent 504 Gateway Timeouts.
-- [x] Verify changes.
+- [x] Reduce `time.sleep` in `trading.py` from 10s to 1s.
+- [x] Add defensive/value stocks to `MARKET_UNIVERSE` in `config.py` (e.g., JPM, JNJ, WMT, PG, KO).
+- [ ] Verify changes.

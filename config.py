@@ -2,8 +2,13 @@
 
 # List of stocks to track and trade
 MARKET_UNIVERSE = [
+    # Tech / Growth (Original)
     "AAPL", "TSLA", "NVDA", "AMD", "MSFT", 
-    "AMZN", "GOOGL", "META", "INTC", "PLTR"
+    "AMZN", "GOOGL", "META", "INTC", "PLTR",
+    
+    # Defensive / Value / Dow Jones (New)
+    "JPM", "JNJ", "WMT", "PG", "KO", 
+    "XOM", "CVX", "HD", "MCD", "ORCL"
 ]
 
 # User's current share counts for portfolio calculation

@@ -376,8 +376,8 @@ def run_simulation(return_logs=False, market_context=None):
                     log(f"      ⚠️ SKIPPED SELL: No position to sell")
 
         # Rate Limiting Sleep
-        # Increased to 10s to stay under Gemini Free Tier limits (15 RPM for 1.5 Flash, 10 RPM for 2.0 Exp)
-        time.sleep(10)
+        # Reduced to 1s for Paid Tier (Gemini 2.5 Flash has high limits)
+        time.sleep(1)
 
     # --- CALCULATE TOTAL EQUITY ---
     holdings_value = 0.0
