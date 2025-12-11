@@ -939,17 +939,13 @@ def get_news():
     
     return {"count": len(results), "articles": results}
 
+from fastapi import BackgroundTasks
+
 @app.post("/test-email")
-def trigger_email():
-    """Manually trigger the email report for testing."""
-    try:
-        generate_and_send_report()
-        return {"status": "Email triggered"}
-    except Exception as e:
-        import traceback
-        error_details = traceback.format_exc()
-        print(f"Error triggering email: {error_details}")
-        return {"status": "Error", "message": str(e), "details": error_details}
+def trigger_email(background_tasks: BackgroundTasks):
+    """Manually trigger the email report for testing (runs in background)."""
+    background_tasks.add_task(generate_and_send_report)
+    return {"status": "Report generation started in background"}
 
 def main():
     # For local CLI testing
