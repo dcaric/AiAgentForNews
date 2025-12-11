@@ -50,8 +50,10 @@ def configure_ai(log_func=print):
         return None
     
     genai.configure(api_key=GEMINI_KEY)
-    possible_models = ['gemini-2.0-flash-exp', 'gemini-2.0-flash', 'gemini-1.5-flash']
-    
+    # Prioritize 1.5 Flash for stability/limits, then 2.0
+   # possible_models = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.0-flash-exp', 'gemini-2.0-flash']
+    possible_models = ['gemini-2.5-flash']
+
     log_func("🔌 Connecting to AI Brain...")
     for model_name in possible_models:
         try:
@@ -374,7 +376,8 @@ def run_simulation(return_logs=False, market_context=None):
                     log(f"      ⚠️ SKIPPED SELL: No position to sell")
 
         # Rate Limiting Sleep
-        time.sleep(2)
+        # Increased to 10s to stay under Gemini Free Tier limits (15 RPM for 1.5 Flash, 10 RPM for 2.0 Exp)
+        time.sleep(10)
 
     # --- CALCULATE TOTAL EQUITY ---
     holdings_value = 0.0
