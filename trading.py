@@ -249,7 +249,13 @@ def run_simulation(return_logs=False, market_context=None):
             
             # 1. BUY LOGIC
             if decision == "BUY":
-                if qty_owned == 0:
+                # CHECK FOR WASH TRADE (Cooldown Rule)
+                today_str = str(date.today())
+                was_sold_today = any(f"{today_str}: SOLD {symbol}" in entry for entry in state["history"])
+                
+                if was_sold_today:
+                    log(f"      ⚠️ SKIPPED BUY: Sold {symbol} today (Wash Trade Prevention)")
+                elif qty_owned == 0:
                     # Calculate Quantity (Max 25% of cash)
                     invest_amount = state["cash"] * 0.25
                     
