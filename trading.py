@@ -180,8 +180,6 @@ def run_simulation(return_logs=False, market_context=None):
         else:
             print(message)
 
-    if not trading_client or not data_client:
-        log("❌ Alpaca clients not initialized. Check API Keys.")
         if return_logs: return "\n".join(logs), []
         return
 
@@ -193,6 +191,16 @@ def run_simulation(return_logs=False, market_context=None):
     state = init_state(log_func=log)
     if "equity_history" not in state:
         state["equity_history"] = []
+
+    # CHECK MARKET HOURS
+    market_open = True
+    try:
+        clock = trading_client.get_clock()
+        if not clock.is_open:
+            market_open = False
+            log("🚫 Market is CLOSED. Running in Read-Only Mode (No AI/Trading).")
+    except Exception as e:
+        log(f"⚠️ Failed to check market hours: {e}. Proceeding with caution...")
 
     log(f"\n💼 PORTFOLIO: ${state['cash']:.2f} Cash | Holdings: {list(state['portfolio'].keys())}")
     
