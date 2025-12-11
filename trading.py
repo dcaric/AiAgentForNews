@@ -180,8 +180,6 @@ def run_simulation(return_logs=False, market_context=None):
         else:
             print(message)
 
-    if not trading_client or not data_client:
-        log("❌ Alpaca clients not initialized. Check API Keys.")
         if return_logs: return "\n".join(logs), []
         return
 
@@ -193,6 +191,16 @@ def run_simulation(return_logs=False, market_context=None):
     state = init_state(log_func=log)
     if "equity_history" not in state:
         state["equity_history"] = []
+
+    # CHECK MARKET HOURS
+    market_open = True
+    try:
+        clock = trading_client.get_clock()
+        if not clock.is_open:
+            market_open = False
+            log("🚫 Market is CLOSED. Running in Read-Only Mode (No AI/Trading).")
+    except Exception as e:
+        log(f"⚠️ Failed to check market hours: {e}. Proceeding with caution...")
 
     log(f"\n💼 PORTFOLIO: ${state['cash']:.2f} Cash | Holdings: {list(state['portfolio'].keys())}")
     
@@ -226,6 +234,10 @@ def run_simulation(return_logs=False, market_context=None):
         if (qty_owned > 0) or (abs(change_pct) > 1.5):
             log(f"\n   🔍 {symbol}: ${price:.2f} ({change_pct:+.2f}%)")
             
+            # SKIPPING AI/TRADING IF MARKET CLOSED
+            if not market_open:
+                 continue
+
             headlines = get_market_news(symbol)
             if headlines: log(f"      📰 News: {headlines[0][:60]}...")
             
@@ -238,7 +250,7 @@ def run_simulation(return_logs=False, market_context=None):
                 if avg > 0:
                     gain = ((price - avg) / avg) * 100
                     log(f"      💰 Position Gain/Loss: {gain:+.2f}% (Entry: ${avg:.2f})")
-
+ 
             ai_result = ask_ai_for_decision(symbol, price, change_pct, headlines, market_context=market_context, portfolio_context=portfolio_ctx, model=ai_model)
             decision = ai_result.get("decision", "HOLD").upper()
             reason = ai_result.get("reason", "N/A")
@@ -251,6 +263,8 @@ def run_simulation(return_logs=False, market_context=None):
             if decision == "BUY":
                 # CHECK FOR WASH TRADE (Cooldown Rule)
                 today_str = str(date.today())
+                # Use current system date for simplicity in simulation, 
+                # but ideally should use clock.timestamp date for live trading across timezones.
                 was_sold_today = any(f"{today_str}: SOLD {symbol}" in entry for entry in state["history"])
                 
                 if was_sold_today:
