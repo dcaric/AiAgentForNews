@@ -69,7 +69,9 @@ class PortfolioManager:
         # Constants for holdings
         self.holdings = MY_HOLDINGS
         self.bucket_name = os.environ.get("BUCKET_NAME")
+        self.bucket_name = os.environ.get("BUCKET_NAME")
         self.history_file = "portfolio_history.json"
+        self.ai_state_file = "portfolio_ai_state.json"
 
     def calculate_total_capital(self, stock_data):
         total = 0.0
@@ -78,7 +80,41 @@ class PortfolioManager:
                 total += stock_data[ticker]['current_price'] * shares
         return total
 
+    def get_real_history(self):
+        """Fetches history for the User's Real Stock Portfolio"""
+        if not self.bucket_name:
+            return []
+        try:
+            storage_client = storage.Client()
+            bucket = storage_client.bucket(self.bucket_name)
+            blob = bucket.blob(self.history_file)
+            if blob.exists():
+                content = blob.download_as_text()
+                return json.loads(content)
+            return []
+        except Exception as e:
+            print(f"Error loading real portfolio history: {e}")
+            return []
+
+    def get_ai_history(self):
+        """Fetches history for the AI Trading Bot"""
+        if not self.bucket_name:
+            return []
+        try:
+            storage_client = storage.Client()
+            bucket = storage_client.bucket(self.bucket_name)
+            blob = bucket.blob(self.ai_state_file)
+            if blob.exists():
+                content = blob.download_as_text()
+                state = json.loads(content)
+                return state.get("equity_history", [])
+            return []
+        except Exception as e:
+            print(f"Error loading AI portfolio history: {e}")
+            return []
+
     def update_history(self, total_capital):
+        """Updates the User's Real Stock Portfolio History"""
         if not self.bucket_name:
             print("BUCKET_NAME not set. Skipping persistence.")
             return []
@@ -617,265 +653,275 @@ import threading
 def generate_and_send_report():
     print("Generating scheduled report...")
     collector = NewsCollector()
-    # summarizer = NewsSummarizer() # Replaced by LLM
     llm_summarizer = LLMSummarizer()
     score_collector = NBAScoreCollector()
     
-    # 1. World News
+    # CHECK MARKET HOURS
+    market_open = False
+    try:
+        if trading.trading_client:
+             clock = trading.trading_client.get_clock()
+             market_open = clock.is_open
+             print(f"Market Status: {'OPEN' if market_open else 'CLOSED'}")
+    except Exception as e:
+        print(f"Error checking market hours: {e}")
+
+
+    html_content = ""
+    html_content += f"<p>Generated at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>"
+
+    # 1. World News (ALWAYS RUN)
+    print("Fetching World News...")
+    html_content += "<h1>World News</h1>"
     world_articles = collector.collect_world_news()
     world_summary = llm_summarizer.summarize_world_news(world_articles)
     
-    html_content = "<h1>World News</h1>"
-    html_content += f"<p>Generated at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>"
-    
-    # LLM Summary Section
     html_content += "<div style='background-color: #f0f8ff; padding: 15px; border-radius: 5px; margin-bottom: 20px;'>"
     html_content += "<h3>🌍 AI Summary</h3>"
     html_content += f"<p>{world_summary}</p>"
-    #html_content += "</div>"
     
-    # World News Links in Light Blue Box
-    #html_content += "<div style='background-color: #f0f8ff; padding: 15px; border-radius: 5px; margin-bottom: 20px;'>"
     for article in world_articles:
         html_content += f"<h4><a href='{article['link']}'>{article['title']}</a></h4>"
     html_content += "</div>"
-        # html_content += f"<p>{article['summary']}</p>" # Optional: keep original snippets? User said "below titles", maybe implies keeping them.
-        # Let's keep titles clean and just rely on the AI summary for the "big picture", 
-        # but user said "summarize all World News below titles". 
-        # I will keep the list of titles/links for reference.
 
-    # 2. Croatian News
-    html_content += "<h1>Croatian News</h1>"
-    cro_articles = collector.collect_croatian_news()
-    cro_curated = llm_summarizer.curate_croatian_news(cro_articles)
-    
-    html_content += "<div style='background-color: #fffaf0; padding: 15px; border-radius: 5px; margin-bottom: 20px;'>"
-    html_content += "<h3>🇭🇷 Najvažnije Vijesti (Hrvatska)</h3>"
-    html_content += f"{cro_curated}"
-    html_content += "</div>"
-
-    # 3. Dalmatia News
-    html_content += "<h1>Dalmatia News</h1>"
-    dal_articles = collector.collect_dalmatia_news()
-    dal_curated = llm_summarizer.curate_dalmatia_news(dal_articles)
-    hajduk_game_info = llm_summarizer.get_next_hajduk_game()
-    
-    html_content += "<div style='background-color: #e0f7fa; padding: 15px; border-radius: 5px; margin-bottom: 20px;'>"
-    html_content += "<h3>🌊 Najvažnije Vijesti (Dalmacija)</h3>"
-    html_content += f"{hajduk_game_info}"
-    html_content += "<hr style='border: 0; border-top: 1px solid #ccc; margin: 15px 0;'>"
-    html_content += f"{dal_curated}"
-    html_content += "</div>"
-
-    # 4. Apple & AI News
-    # 4. Tech Portfolio News
-    html_content += "<h1>Tech Portfolio News</h1>"
-    tech_articles = collector.collect_tech_news()
-    tech_curated = llm_summarizer.curate_tech_news(tech_articles)
-    
-    html_content += "<div style='background-color: #f3e5f5; padding: 15px; border-radius: 5px; margin-bottom: 20px;'>"
-    html_content += "<h3>📱 Portfolio Highlights</h3>"
-    html_content += f"{tech_curated}"
-    html_content += "</div>"
-
-    # 5. NBA News
-    html_content += "<h1>NBA News</h1>"
-    
-    # Start NBA Container
-    html_content += "<div style='background-color: #fff8e1; padding: 15px; border-radius: 5px; margin-bottom: 20px;'>"
-    
-    nba_articles = collector.collect_nba_news()
-    # Using world news summarizer for now as it's generic enough, or could add specific NBA one
-    nba_summary = llm_summarizer.summarize_world_news(nba_articles)
-    
-    html_content += "<h3>🏀 NBA Updates</h3>"
-    html_content += f"<p>{nba_summary}</p>"
-    html_content += "<br>"
-
-    # 6. NBA Scores Table
-    scores = score_collector.get_last_nights_scores()
-    
-    # NBA Trends Analysis (using whatever recent data we have)
-    weekly_scores = score_collector.get_weekly_scores()
-    nba_trends = llm_summarizer.analyze_nba_trends(weekly_scores)
-    
-    html_content += "<h3>🏀 AI Performance Analysis</h3>"
-    html_content += f"<p>{nba_trends}</p>"
-    html_content += "<br>"
-
-    if scores:
-        html_content += "<h2>NBA Scores</h2>"
-        html_content += "<table border='1' cellpadding='5' style='border-collapse: collapse; width: 100%; background-color: white;'>"
-        html_content += "<tr style='background-color: #f2f2f2;'><th>Matchup</th><th>Score</th><th>Status</th></tr>"
-        for game in scores:
-            html_content += f"<tr><td>{game['matchup']}</td><td>{game['score']}</td><td>{game['status']}</td></tr>"
-        html_content += "</table>" # Close the table tag
-        
-    html_content += "<br>"
-    html_content += "<h3>Latest Headlines</h3>"
-    for article in nba_articles:
-         html_content += f"<h4><a href='{article['link']}'>{article['title']}</a></h4>"
-         
-    html_content += "</div>" # Close NBA Container
-
-    # 7. Stock Portfolio
-    html_content += "<h1>Stock Portfolio</h1>"
-    stock_collector = StockCollector() # Re-initialize if not already in scope, or ensure it's available
-    stock_data = stock_collector.get_stock_data()
-    
-    # Calculate Total Capital
-    portfolio_manager = PortfolioManager() # Re-initialize if not already in scope, or ensure it's available
-    total_capital = portfolio_manager.calculate_total_capital(stock_data)
-    
-    # Update History (Persistence)
-    history = portfolio_manager.update_history(total_capital)
-    
-    # Initialize GraphGenerator
-    graph_generator = GraphGenerator()
     images = {}
-    
-    html_content += "<div style='background-color: #e8f5e9; padding: 15px; border-radius: 5px; margin-bottom: 20px;'>"
-    html_content += "<h3>💰 Portfolio Overview</h3>"
-    html_content += f"<h2>Total Capital: ${total_capital:,.2f}</h2>"
-    
-    html_content += "<table border='1' cellpadding='5' style='border-collapse: collapse; width: 100%;'>"
-    for ticker, data in stock_data.items():
-        price = data['current_price']
-        change = data['change']
-        pct = (change / (price - change)) * 100 if (price - change) != 0 else 0
+
+    # --- MODE 1: MARKET OPEN (STOCKS & TECH) ---
+    if market_open:
+        print("Market is OPEN - Running Stock & Tech Tasks...")
+
+        # 2. Tech Portfolio News
+        html_content += "<h1>Tech Portfolio News</h1>"
+        tech_articles = collector.collect_tech_news()
+        tech_curated = llm_summarizer.curate_tech_news(tech_articles)
         
-        arrow = "🟢 ▲" if change >= 0 else "🔴 ▼"
-        color = "green" if change >= 0 else "red"
-        
-        # Generate graph
-        img_buf = graph_generator.generate_stock_chart(ticker, data['history'])
-        img_id = f"chart_{ticker}"
-        images[img_id] = img_buf
-        
-        html_content += f"""
-        <tr>
-            <td style="padding: 10px; border-bottom: 1px solid #ddd;">
-                <h3>{ticker} {arrow}</h3>
-                <p style="font-size: 1.2em; font-weight: bold;">${price:.2f}</p>
-                <p style="color: {color};">{change:+.2f} ({pct:+.2f}%)</p>
-            </td>
-            <td style="padding: 10px; border-bottom: 1px solid #ddd;">
-                <img src="cid:{img_id}" alt="{ticker} Chart" style="width: 300px; height: auto;">
-            </td>
-        </tr>
-        """
-    html_content += "</table>"
-    
-    # Total Capital
-    # Determine arrow for total capital (compare to yesterday if available, else just show value)
-    capital_arrow = ""
-    if len(history) > 1:
-        prev_total = history[-2]['total']
-        if total_capital >= prev_total:
-            capital_arrow = "🟢 ▲"
-        else:
-            capital_arrow = "🔴 ▼"
-            
-    html_content += f"<h2>Total Capital: ${total_capital:.2f} {capital_arrow}</h2>"
-    
-    # Portfolio Graph
-    portfolio_img_buf = graph_generator.generate_portfolio_chart(history)
-    if portfolio_img_buf:
-        img_id = "chart_portfolio"
-        images[img_id] = portfolio_img_buf
-        html_content += f'<img src="cid:{img_id}" alt="Portfolio History" style="width: 100%; max-width: 600px; height: auto;">'
-    elif not portfolio_manager.bucket_name:
-        html_content += "<p><i>(Persistence not enabled. Set BUCKET_NAME to see history graph)</i></p>"
-
-    # Combined RSS feeds for analysis (World + Tech + Specific Tickers)
-    specific_stock_articles = collector.collect_specific_stock_news(MARKET_UNIVERSE)
-    
-    full_news_context = "WORLD NEWS_ARTICLES:\n"
-    for art in world_articles:
-        full_news_context += f"-Title: {art['title']}\n Summary: {art['summary']}\n"
-        
-    full_news_context += "\nTECH SECTOR NEWS ARTICLES:\n"
-    for art in tech_articles:
-        full_news_context += f"-Title: {art['title']}\n Summary: {art['summary']}\n"
-
-    full_news_context += "\nTARGETED STOCK NEWS ARTICLES (Yahoo Finance):\n"
-    for art in specific_stock_articles:
-        full_news_context += f"-Title: {art['title']}\n Summary: {art['summary']}\n"
-
-    stock_analysis = llm_summarizer.analyze_stock_market(full_news_context)
-    html_content += "<hr style='border: 0; border-top: 1px solid #ccc; margin: 15px 0;'>"
-    html_content += "<h3>🤖 AI Market Analysis</h3>"
-    
-    # Overall Market Status
-    try:
-        market_status = trading.get_market_status()
-        if market_status:
-            html_content += f"""
-            <div style='background-color: #e8eaed; padding: 10px; border-radius: 5px; margin-bottom: 15px;'>
-                <p style='margin: 0; font-size: 1.1em;'>
-                    <b>Overall Market Status:</b> {market_status['status']} 
-                    <span style='font-size: 0.9em; color: #555;'>
-                        (Avg Change: {market_status['avg_change']:+.2f}%)
-                    </span>
-                </p>
-                <p style='margin: 5px 0 0 0; font-size: 0.9em;'>
-                    🟢 <b>{market_status['up_count']}</b> Up &nbsp;|&nbsp; 🔴 <b>{market_status['down_count']}</b> Down
-                </p>
-            </div>
-            """
-    except Exception as e:
-        print(f"Error fetching market status: {e}")
-
-    html_content += f"{stock_analysis}"
-    
-    
-    # 8. Trading Simulation Report
-    attachments = {}
-    try:
-        # Combine World News and Tech/AI News for richer context
-        combined_context = f"""
-        WORLD NEWS SUMMARY (Politics, Macroeconomics):
-        {world_summary}
-
-        TECH PORTFOLIO NEWS (Sector Trends, Specific Stock News):
-        {tech_curated}
-
-        GENERAL MARKET ANALYSIS (Financial Media Sentiment):
-        {stock_analysis}
-        """
-
-        # Pass the Combined Context to the Trading AI
-        trading_report_log, trading_state = trading.run_simulation(return_logs=True, market_context=combined_context)
-        
-        html_content += "<h1>Trading Simulation</h1>"
-        html_content += "<div style='background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin-bottom: 20px; font-family: monospace; white-space: pre-wrap;'>"
-        html_content += f"<h3>📈 Simulation Log</h3>"
-        html_content += f"<pre>{trading_report_log}</pre>"
-
-        # Generate Equity Graph
-        equity_history = trading_state.get("equity_history", [])
-        if equity_history:
-            trading_img_buf = graph_generator.generate_portfolio_chart(equity_history)
-            if trading_img_buf:
-                trading_img_id = "chart_trading_equity"
-                images[trading_img_id] = trading_img_buf
-                html_content += f"<h3>💰 Total Equity Growth</h3>"
-                html_content += f'<img src="cid:{trading_img_id}" alt="Total Equity History" style="width: 100%; max-width: 600px; height: auto;">'
-        
-        # Prepare Transaction History Attachment
-        tx_history = trading_state.get("history", [])
-        if tx_history:
-            # Join with newlines
-            history_text = "\n".join(tx_history)
-            attachments["transaction_history.txt"] = history_text
-            html_content += "<p><i>(Full transaction history attached as transaction_history.txt)</i></p>"
-
+        html_content += "<div style='background-color: #f3e5f5; padding: 15px; border-radius: 5px; margin-bottom: 20px;'>"
+        html_content += "<h3>📱 Portfolio Highlights</h3>"
+        html_content += f"{tech_curated}"
         html_content += "</div>"
-    except Exception as e:
-        print(f"Error running trading simulation: {e}")
-        html_content += f"<p>Error running trading simulation: {e}</p>"
+        
+        # 2.1 Market Analysis (NEW SECTION)
+        # Collect Targeted Stock News for Context
+        specific_stock_articles = collector.collect_specific_stock_news(MARKET_UNIVERSE)
+        
+        full_news_context = "WORLD NEWS SUMMARY:\n" + world_summary + "\n"
+        full_news_context += "TECH NEWS SUMMARY:\n" + tech_curated + "\n"
+        full_news_context += "\nTARGETED STOCK NEWS ARTICLES (Yahoo Finance):\n"
+        for art in specific_stock_articles:
+            full_news_context += f"-Title: {art['title']}\n Summary: {art['summary']}\n"
 
-    html_content += "</div>" # Close Stock Portfolio div
+        print("Analyzing Market Sentiment...")
+        stock_analysis = llm_summarizer.analyze_stock_market(full_news_context)
+        
+        html_content += "<hr style='border: 0; border-top: 1px solid #ccc; margin: 15px 0;'>"
+        html_content += "<h3>🤖 AI Market Analysis</h3>"
+        
+        # Overall Market Status
+        try:
+            market_status = trading.get_market_status()
+            if market_status:
+                html_content += f"""
+                <div style='background-color: #e8eaed; padding: 10px; border-radius: 5px; margin-bottom: 15px;'>
+                    <p style='margin: 0; font-size: 1.1em;'>
+                        <b>Overall Market Status:</b> {market_status['status']} 
+                        <span style='font-size: 0.9em; color: #555;'>
+                            (Avg Change: {market_status['avg_change']:+.2f}%)
+                        </span>
+                    </p>
+                    <p style='margin: 5px 0 0 0; font-size: 0.9em;'>
+                        🟢 <b>{market_status['up_count']}</b> Up &nbsp;|&nbsp; 🔴 <b>{market_status['down_count']}</b> Down
+                    </p>
+                </div>
+                """
+        except Exception as e:
+            print(f"Error fetching market status: {e}")
+
+        html_content += f"{stock_analysis}"
+
+        # 2.5 Trading Simulation (Run the Bot)
+        print("Running Trading Simulation...")
+        html_content += "<h1>Trading Simulation</h1>"
+        try:
+            # Pass the Combined Context to the Trading AI
+            # We reuse full_news_context which is now rich with data
+            simulation_logs, state = trading.run_simulation(return_logs=True, market_context=full_news_context)
+            # Format logs for HTML (replace newlines with <br>)
+            formatted_logs = simulation_logs.replace("\n", "<br>")
+            
+            html_content += "<div style='background-color: #e3f2fd; padding: 15px; border-radius: 5px; margin-bottom: 20px; font-family: monospace; font-size: 0.9em;'>"
+            html_content += "<h3>🤖 AI Trader Activity</h3>"
+            html_content += f"{formatted_logs}"
+            
+            # --- MOVED: Portfolio Growth Graph ---
+            graph_generator = GraphGenerator() # Ensure initialized
+            
+            # We can use the 'state' returned from run_simulation which has the fresh history
+            if state and "equity_history" in state:
+                history = state["equity_history"]
+                portfolio_img_buf = graph_generator.generate_portfolio_chart(history)
+                
+                if portfolio_img_buf:
+                    img_id = "chart_portfolio"
+                    images[img_id] = portfolio_img_buf
+                    html_content += "<br><hr style='border: 0; border-top: 1px solid #ccc; margin: 15px 0;'>"
+                    html_content += "<h3>💰 Total Equity Growth</h3>"
+                    html_content += f'<img src="cid:{img_id}" alt="Portfolio History" style="width: 100%; max-width: 600px; height: auto;">'
+            # -------------------------------------
+            
+            html_content += "</div>"
+        except Exception as e:
+            print(f"Error running simulation: {e}")
+            html_content += f"<p>Error running simulation: {e}</p>"
+
+        # 3. Stock Portfolio
+        html_content += "<h1>Stock Portfolio</h1>"
+        stock_collector = StockCollector()
+        stock_data = stock_collector.get_stock_data()
+        
+        portfolio_manager = PortfolioManager()
+        total_capital = portfolio_manager.calculate_total_capital(stock_data)
+        history = portfolio_manager.update_history(total_capital)
+        
+        graph_generator = GraphGenerator()
+        
+        html_content += "<div style='background-color: #e8f5e9; padding: 15px; border-radius: 5px; margin-bottom: 20px;'>"
+        html_content += "<h3>💰 Portfolio Overview</h3>"
+        html_content += f"<h2>Total Capital: ${total_capital:,.2f}</h2>"
+        
+        html_content += "<table border='1' cellpadding='5' style='border-collapse: collapse; width: 100%;'>"
+        for ticker, data in stock_data.items():
+            price = data['current_price']
+            change = data['change']
+            pct = (change / (price - change)) * 100 if (price - change) != 0 else 0
+            
+            arrow = "🟢 ▲" if change >= 0 else "🔴 ▼"
+            color = "green" if change >= 0 else "red"
+            
+            img_buf = graph_generator.generate_stock_chart(ticker, data['history'])
+            img_id = f"chart_{ticker}"
+            images[img_id] = img_buf
+            
+            html_content += f"""
+            <tr>
+                <td style="padding: 10px; border-bottom: 1px solid #ddd;">
+                    <h3>{ticker} {arrow}</h3>
+                    <p style="font-size: 1.2em; font-weight: bold;">${price:.2f}</p>
+                    <p style="color: {color};">{change:+.2f} ({pct:+.2f}%)</p>
+                </td>
+                <td style="padding: 10px; border-bottom: 1px solid #ddd;">
+                    <img src="cid:{img_id}" alt="{ticker} Chart" style="width: 300px; height: auto;">
+                </td>
+            </tr>
+            """
+        html_content += "</table>"
+        
+        capital_arrow = ""
+        if len(history) > 1:
+            prev_total = history[-2]['total']
+            if total_capital >= prev_total:
+                capital_arrow = "🟢 ▲"
+            else:
+                capital_arrow = "🔴 ▼"
+                
+        html_content += f"<h2>Total Capital: ${total_capital:.2f} {capital_arrow}</h2>"
+        
+        # Real Portfolio History Graph
+        real_history = portfolio_manager.get_real_history()
+        # Since update_history returns the updated list, we could use the return value from above
+        # But to be safe and consistent with the new method logic:
+        
+        if real_history:
+            portfolio_img_buf = graph_generator.generate_portfolio_chart(real_history)
+            if portfolio_img_buf:
+                img_id = "chart_portfolio_real"
+                images[img_id] = portfolio_img_buf
+                html_content += f'<img src="cid:{img_id}" alt="Real Portfolio History" style="width: 100%; max-width: 600px; height: auto;">'
+        elif not portfolio_manager.bucket_name:
+            html_content += "<p><i>(Persistence not enabled. Set BUCKET_NAME to see history graph)</i></p>"
+        
+        html_content += "</div>"
+
+    # --- MODE 2: MARKET CLOSED (LIFESTYLE & SPORTS) ---
+    else:
+        print("Market is CLOSED - Running Lifestyle & Sports Tasks...")
+
+        # 2. Croatian News
+        html_content += "<h1>Croatian News</h1>"
+        cro_articles = collector.collect_croatian_news()
+        cro_curated = llm_summarizer.curate_croatian_news(cro_articles)
+        
+        html_content += "<div style='background-color: #fffaf0; padding: 15px; border-radius: 5px; margin-bottom: 20px;'>"
+        html_content += "<h3>🇭🇷 Najvažnije Vijesti (Hrvatska)</h3>"
+        html_content += f"{cro_curated}"
+        html_content += "</div>"
+
+        # 3. Dalmatia News
+        html_content += "<h1>Dalmatia News</h1>"
+        dal_articles = collector.collect_dalmatia_news()
+        dal_curated = llm_summarizer.curate_dalmatia_news(dal_articles)
+        hajduk_game_info = llm_summarizer.get_next_hajduk_game()
+        
+        html_content += "<div style='background-color: #e0f7fa; padding: 15px; border-radius: 5px; margin-bottom: 20px;'>"
+        html_content += "<h3>🌊 Najvažnije Vijesti (Dalmacija)</h3>"
+        html_content += f"{hajduk_game_info}"
+        html_content += "<hr style='border: 0; border-top: 1px solid #ccc; margin: 15px 0;'>"
+        html_content += f"{dal_curated}"
+        html_content += "</div>"
+
+        # 4. NBA News
+        html_content += "<h1>NBA News</h1>"
+        html_content += "<div style='background-color: #fff8e1; padding: 15px; border-radius: 5px; margin-bottom: 20px;'>"
+        
+        nba_articles = collector.collect_nba_news()
+        nba_summary = llm_summarizer.summarize_world_news(nba_articles)
+        
+        html_content += "<h3>🏀 NBA Updates</h3>"
+        html_content += f"<p>{nba_summary}</p>"
+        html_content += "<br>"
+
+        scores = score_collector.get_last_nights_scores()
+        weekly_scores = score_collector.get_weekly_scores()
+        nba_trends = llm_summarizer.analyze_nba_trends(weekly_scores)
+        
+        html_content += "<h3>🏀 AI Performance Analysis</h3>"
+        html_content += f"<p>{nba_trends}</p>"
+        html_content += "<br>"
+        
+        if scores:
+            html_content += "<h2>NBA Scores</h2>"
+            html_content += "<table border='1' cellpadding='5' style='border-collapse: collapse; width: 100%; background-color: white;'>"
+            html_content += "<tr style='background-color: #f2f2f2;'><th>Matchup</th><th>Score</th><th>Status</th></tr>"
+            for game in scores:
+                html_content += f"<tr><td>{game['matchup']}</td><td>{game['score']}</td><td>{game['status']}</td></tr>"
+            html_content += "</table>"
+            
+        html_content += "<br>"
+        html_content += "<h3>Latest Headlines</h3>"
+        for article in nba_articles:
+             html_content += f"<h4><a href='{article['link']}'>{article['title']}</a></h4>"
+             
+        html_content += "</div>"
+
+
+    # Prepare Attachments
+    attachments = {}
+    if market_open:
+        try:
+            # Fetch Transaction History from Bot State
+            state = trading.init_state(log_func=lambda x: None) # Quiet init
+            history_list = state.get("history", [])
+            history_text = "\n".join(history_list)
+            attachments['transaction_history.txt'] = history_text
+            print(f"Attached transaction history ({len(history_list)} entries)")
+        except Exception as e:
+            print(f"Error preparing transaction history attachment: {e}")
+
+    # Send Email
+    subject = f"AI News Report - {datetime.now().strftime('%Y-%m-%d')} ({'MARKET OPEN' if market_open else 'EVENING EDITION'})"
+    email_service = EmailService()
+    email_service.send_email(subject, html_content, images=images, attachments=attachments)
+
+
     html_content += "</body></html>"
 
     email_service = EmailService()

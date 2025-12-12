@@ -22,7 +22,7 @@ STATE_FILE_NAME = 'portfolio_ai_state.json'
 # B. Simulation Settings
 STARTING_CASH = 1000.0
 # MARKET_UNIVERSE imported from config
-from config import MARKET_UNIVERSE 
+from config import MARKET_UNIVERSE, TRADING_RULES 
 
 # C. Load API Keys
 ALPACA_KEY = os.environ.get('ALPACA_API_KEY')
@@ -148,12 +148,7 @@ def ask_ai_for_decision(symbol, price, pct_change, news_headlines, market_contex
     {world_context_text}
     
     STRATEGY RULES:
-    1. ANALYZE GLOBAL IMPACT & NEWS: Are there major headwinds? If NEWS is NEGATIVE, SELL/AVOID.
-    2. TAKE PROFIT: If we own the stock AND price is > 5% above Avg Entry, SELL (Lock in gains).
-    3. STOP LOSS: If we own the stock AND price is < 5% below Avg Entry, SELL (Stop the bleeding).
-    4. DIP BUY: If we DO NOT own it: Price down > 2% (Overreaction) AND News is NOT Negative -> BUY.
-    5. MOMENTUM: If we DO NOT own it: Price up > 3% (FOMO) -> BUY.
-    6. HOLD: If none of the above trigger, HOLD.
+    {chr(10).join(TRADING_RULES)}
     
     Output strictly valid JSON (Example):
     {{ "decision": "HOLD", "reason": "Price is flat, no significant news." }}
@@ -372,8 +367,8 @@ def run_simulation(return_logs=False, market_context=None):
                     log(f"      🚨 SOLD {qty_owned} {symbol} (Market Order)")
                 except Exception as e:
                     log(f"      ❌ Sell Failed: {e}")
-                else:
-                    log(f"      ⚠️ SKIPPED SELL: No position to sell")
+            else:
+                log(f"      ⚠️ SKIPPED SELL: No position to sell")
 
         # Rate Limiting Sleep
         # Reduced to 1s for Paid Tier (Gemini 2.5 Flash has high limits)
